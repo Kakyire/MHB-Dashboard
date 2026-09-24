@@ -1,4 +1,4 @@
-export type CopyrightStatus = "public_domain" | "licensed" | "permission_granted";
+export type CopyrightStatus = "public_domain" | "licensed" | "permission_granted" | "unknown";
 
 export interface SourceDraft {
   title: string;
@@ -12,6 +12,12 @@ export interface SourceDraft {
   topic: string;
   pageReference: string;
   content: string;
+  originalStoragePath?: string;
+  originalFileName?: string;
+  importKind?: "pdf" | "web";
+  importSectionIndex?: number;
+  importSectionCount?: number;
+  importTotalCharacters?: number;
 }
 
 export interface IngestedDraft {
@@ -23,14 +29,20 @@ export interface IngestedDraft {
 
 export const initialSourceDraft: SourceDraft = {
   title: "",
-  publisher: "Methodist Church Ghana",
+  publisher: "",
   denomination: "Methodist Church Ghana",
   jurisdiction: "MCG",
   authorityLevel: 4,
   canonicalUrl: "",
-  copyrightStatus: "permission_granted",
-  versionLabel: "2026 edition",
-  topic: "history",
+  copyrightStatus: "unknown",
+  versionLabel: "",
+  topic: "",
   pageReference: "",
   content: "",
+  originalStoragePath: undefined,
+  originalFileName: undefined,
+  importKind: undefined,
+  importSectionIndex: undefined,
+  importSectionCount: undefined,
+  importTotalCharacters: undefined,
 };
