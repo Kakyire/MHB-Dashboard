@@ -31,6 +31,7 @@ type ImportedSource = {
   sectionCount: number;
   totalCharacters: number;
 };
+const SOURCE_INGESTION_TIMEOUT_MS = 9 * 60 * 1_000;
 
 const authorityLabels: Record<number, string> = {
   5: "5 — Official MCG primary publication",
@@ -162,7 +163,9 @@ export function App() {
     setRequestState("creating");
     setError(null);
     try {
-      const call = httpsCallable<IngestSourceDraft, IngestedDraft>(functions, "ingestWesleySource");
+      const call = httpsCallable<IngestSourceDraft, IngestedDraft>(functions, "ingestWesleySource", {
+        timeout: SOURCE_INGESTION_TIMEOUT_MS,
+      });
       const { data } = await call({
         title: draftSnapshot.title,
         authorityLevel: draftSnapshot.authorityLevel,
