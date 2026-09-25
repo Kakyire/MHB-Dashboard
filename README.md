@@ -18,10 +18,39 @@ credential, service-role key, or Gemini credential.
    generates embeddings.
 6. At the final publish step, the staff member confirms the source's usage
    basis, then explicitly calls `publishWesleySourceVersion`.
+7. The Source library shows the approved sources already available to Wesley,
+   so staff can check it before adding another item.
 
 The public MHB application cannot use any admin operation. Imports never
 publish automatically: a staff editor must review the extracted text and
 authority, then confirm the usage basis before publishing.
+
+## Published-source list API
+
+The dashboard calls the administrator-only Firebase callable
+`listPublishedWesleySources`. It should return:
+
+```ts
+{
+  sources: Array<{
+    sourceId: string;
+    sourceVersionId: string;
+    title: string;
+    authorityLevel: number;
+    publisher?: string;
+    versionLabel?: string;
+    topic?: string;
+    jurisdiction?: string;
+    pageReference?: string;
+    canonicalUrl?: string;
+    publishedAt?: string;
+  }>;
+}
+```
+
+Only approved, non-retired source versions should be returned. This repository
+contains the dashboard UI only; the callable must be supplied by the separate
+backend before the live list can load.
 
 ## Local setup
 

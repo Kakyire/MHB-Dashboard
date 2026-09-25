@@ -27,6 +27,21 @@ export interface IngestedDraft {
   reviewStatus: "draft";
 }
 
+/** Metadata that may be shown to source administrators after publication. */
+export interface PublishedSource {
+  sourceId: string;
+  sourceVersionId: string;
+  title: string;
+  authorityLevel: number;
+  publisher?: string;
+  versionLabel?: string;
+  topic?: string;
+  jurisdiction?: string;
+  pageReference?: string;
+  canonicalUrl?: string;
+  publishedAt?: string;
+}
+
 export const initialSourceDraft: SourceDraft = {
   title: "",
   publisher: "",

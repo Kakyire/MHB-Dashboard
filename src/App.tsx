@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { auth, firebaseConfigurationError, functions, googleProvider } from "./firebase";
-import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type SourceDraft } from "./types";
+import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type PublishedSource, type SourceDraft } from "./types";
 
 type Screen = "library" | "new" | "review";
 type RequestState = "idle" | "importing" | "creating" | "publishing" | "published";
@@ -32,6 +32,8 @@ type ImportedSource = {
   totalCharacters: number;
 };
 const SOURCE_INGESTION_TIMEOUT_MS = 9 * 60 * 1_000;
+
+type PublishedSourcesResponse = { sources: PublishedSource[] };
 
 const authorityLabels: Record<number, string> = {
   5: "5 — Official MCG primary publication",
@@ -68,6 +70,8 @@ export function App() {
   const [ingestedDraft, setIngestedDraft] = useState<IngestedDraft | null>(null);
   const [publishCopyrightStatus, setPublishCopyrightStatus] = useState<Exclude<CopyrightStatus, "unknown"> | "">("");
   const [requestState, setRequestState] = useState<RequestState>("idle");
+  const [publishedSources, setPublishedSources] = useState<PublishedSource[]>([]);
+  const [libraryState, setLibraryState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,6 +90,27 @@ export function App() {
     () => source.content.trim() ? source.content.trim().split(/\s+/).length : 0,
     [source.content],
   );
+
+  const loadPublishedSources = useCallback(async (): Promise<void> => {
+    if (!functions) return;
+    setLibraryState("loading");
+    try {
+      const list = httpsCallable<void, PublishedSourcesResponse>(functions, "listPublishedWesleySources");
+      const { data } = await list();
+      setPublishedSources(data.sources);
+      setLibraryState("ready");
+    } catch {
+      setLibraryState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setPublishedSources([]);
+      return;
+    }
+    void loadPublishedSources();
+  }, [isAdmin, loadPublishedSources]);
 
   async function signIn(): Promise<void> {
     if (!auth) return;
@@ -200,6 +225,7 @@ export function App() {
       const publish = httpsCallable<{ sourceVersionId: string; copyrightStatus: Exclude<CopyrightStatus, "unknown"> }, { published: true }>(functions, "publishWesleySourceVersion");
       await publish({ sourceVersionId: ingestedDraft.sourceVersionId, copyrightStatus: publishCopyrightStatus });
       setRequestState("published");
+      void loadPublishedSources();
     } catch (publishError) {
       setRequestState("idle");
       setError(readableError(publishError));
@@ -244,7 +270,7 @@ export function App() {
         </nav>
 
         <section className="content" aria-live="polite">
-          {screen === "library" && <Library onAdd={startAnotherSource} />}
+          {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} />}
           {screen === "new" && (
             <SourceForm
               source={source}
@@ -307,16 +333,45 @@ function ConfigurationNotice({ detail }: { detail: string }) {
   </section></main>;
 }
 
-function Library({ onAdd }: { onAdd: () => void }) {
+function Library({ sources, state, onAdd, onRefresh }: { sources: PublishedSource[]; state: "loading" | "ready" | "error"; onAdd: () => void; onRefresh: () => Promise<void> }) {
+  const [query, setQuery] = useState("");
+  const matchingSources = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return sources;
+    return sources.filter((source) => [source.title, source.publisher, source.versionLabel, source.topic, source.jurisdiction, source.canonicalUrl]
+      .filter((value): value is string => Boolean(value))
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
+  }, [query, sources]);
+
   return <>
-    <div className="page-heading"><div><p className="eyebrow">SOURCE GOVERNANCE</p><h1>Build a library Wesley can trust.</h1><p>Every source is drafted, reviewed, and explicitly published. Wesley never draws from unreviewed material.</p></div><button className="primary-button" onClick={onAdd}>Add a source</button></div>
-    <div className="status-grid">
+    <div className="page-heading"><div><p className="eyebrow">SOURCE GOVERNANCE</p><h1>Published sources</h1><p>Review the live library before preparing a source, so the team can avoid uploading or publishing the same material twice.</p></div><button className="primary-button" onClick={onAdd}>Add a source</button></div>
+    <section className="library-panel" aria-labelledby="published-sources-heading">
+      <div className="library-toolbar"><div><h2 id="published-sources-heading">{state === "loading" ? "Loading published sources…" : `${sources.length} published ${sources.length === 1 ? "source" : "sources"}`}</h2><p>Only approved versions are listed here.</p></div><button className="secondary-button" onClick={() => void onRefresh()} disabled={state === "loading"}>{state === "loading" ? "Refreshing…" : "Refresh list"}</button></div>
+      <label className="library-search">Search published sources<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title, publisher, topic, URL…" disabled={state === "loading"}/></label>
+      {state === "error" && <p className="library-message">The published-source list is unavailable. Try refreshing before adding a source.</p>}
+      {state === "ready" && matchingSources.length === 0 && <p className="library-message">{sources.length === 0 ? "No sources have been published yet." : "No published sources match that search."}</p>}
+      {matchingSources.length > 0 && <div className="published-source-list">{matchingSources.map((source) => <PublishedSourceRow key={source.sourceVersionId} source={source}/>)}</div>}
+    </section>
+    <div className="status-grid library-guidance">
       <article><span className="status-dot draft"/><strong>Draft first</strong><p>Text and metadata remain private while you check them.</p></article>
       <article><span className="status-dot review"/><strong>Review carefully</strong><p>Confirm authority, rights, extraction quality, and page references.</p></article>
       <article><span className="status-dot published"/><strong>Publish deliberately</strong><p>Only published versions can support a Wesley answer.</p></article>
     </div>
     <section className="callout"><h2>Start with primary sources.</h2><p>Use official Methodist Church Ghana publications, diocesan materials, approved constitutions, and licensed historical works. Do not add social posts, anonymous documents, or text without a valid right to use it.</p></section>
   </>;
+}
+
+function PublishedSourceRow({ source }: { source: PublishedSource }) {
+  return <article className="published-source">
+    <div><h3>{source.title}</h3><p>{[source.publisher, source.versionLabel, source.jurisdiction].filter(Boolean).join(" · ") || "Citation details not supplied"}</p></div>
+    <div className="published-source-meta"><span className="authority-tag">Level {source.authorityLevel}</span>{source.topic && <span>{source.topic}</span>}{source.pageReference && <span>{source.pageReference}</span>}{source.publishedAt && <span>Published {formatPublishedDate(source.publishedAt)}</span>}</div>
+    {source.canonicalUrl && <a href={source.canonicalUrl} target="_blank" rel="noreferrer">View original source</a>}
+  </article>;
+}
+
+function formatPublishedDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
 }
 
 function SourceForm({ source, wordCount, requestState, onChange, onImport, onReview, error }: {
