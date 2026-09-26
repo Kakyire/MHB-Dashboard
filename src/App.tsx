@@ -6,6 +6,7 @@ import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type Publ
 
 type Screen = "library" | "new" | "review";
 type RequestState = "idle" | "importing" | "creating" | "publishing" | "published";
+type Theme = "light" | "dark";
 type IngestSourceDraft = Pick<SourceDraft, "title" | "authorityLevel" | "content"> & {
   publisher?: string;
   denomination?: string;
@@ -60,6 +61,16 @@ function sourceIsValid(source: SourceDraft): boolean {
     && source.content.length <= 80_000;
 }
 
+function initialTheme(): Theme {
+  try {
+    const savedTheme = window.localStorage.getItem("wesley-dashboard-theme");
+    if (savedTheme === "light" || savedTheme === "dark") return savedTheme;
+  } catch {
+    // A blocked storage area should not prevent the dashboard from opening.
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>("library");
   const [user, setUser] = useState<User | null>(null);
@@ -73,6 +84,21 @@ export function App() {
   const [publishedSources, setPublishedSources] = useState<PublishedSource[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    try {
+      window.localStorage.setItem("wesley-dashboard-theme", theme);
+    } catch {
+      // The selected theme remains active for this visit when storage is unavailable.
+    }
+  }, [theme]);
+
+  function toggleTheme(): void {
+    setTheme((currentTheme) => currentTheme === "dark" ? "light" : "dark");
+  }
 
   useEffect(() => {
     if (!auth) {
@@ -243,11 +269,11 @@ export function App() {
   }
 
   if (firebaseConfigurationError || !auth || !functions) {
-    return <ConfigurationNotice detail={firebaseConfigurationError ?? "Firebase configuration is incomplete."} />;
+    return <ConfigurationNotice detail={firebaseConfigurationError ?? "Firebase configuration is incomplete."} theme={theme} onToggleTheme={toggleTheme} />;
   }
   if (authLoading) return <main className="loading-page">Opening Wesley Sources…</main>;
-  if (!user) return <SignIn onSignIn={signIn} error={error} />;
-  if (!isAdmin) return <AccessDenied email={user.email ?? "this account"} onActivate={activateInitialAdmin} onSignOut={signOutDashboard} />;
+  if (!user) return <SignIn onSignIn={signIn} error={error} theme={theme} onToggleTheme={toggleTheme} />;
+  if (!isAdmin) return <AccessDenied email={user.email ?? "this account"} onActivate={activateInitialAdmin} onSignOut={signOutDashboard} theme={theme} onToggleTheme={toggleTheme} />;
 
   return (
     <main className="app-shell">
@@ -257,6 +283,7 @@ export function App() {
           <span><strong>Wesley Sources</strong><small>MHB staff workspace</small></span>
         </button>
         <div className="account">
+          <ThemeToggle theme={theme} onToggle={toggleTheme}/>
           <span>{user.email ?? "Wesley administrator"}</span>
           <button className="text-button" onClick={signOutDashboard}>Sign out</button>
         </div>
@@ -302,8 +329,16 @@ export function App() {
   );
 }
 
-function SignIn({ onSignIn, error }: { onSignIn: () => Promise<void>; error: string | null }) {
+function ThemeToggle({ theme, onToggle, floating = false }: { theme: Theme; onToggle: () => void; floating?: boolean }) {
+  const isDark = theme === "dark";
+  return <button className={floating ? "theme-toggle floating" : "theme-toggle"} onClick={onToggle} aria-label={`Switch to ${isDark ? "light" : "dark"} mode`} title={`Switch to ${isDark ? "light" : "dark"} mode`}>
+    <span aria-hidden="true">{isDark ? "☀" : "◐"}</span><span>{isDark ? "Light" : "Dark"}</span>
+  </button>;
+}
+
+function SignIn({ onSignIn, error, theme, onToggleTheme }: { onSignIn: () => Promise<void>; error: string | null; theme: Theme; onToggleTheme: () => void }) {
   return <main className="auth-page"><section className="auth-card">
+    <ThemeToggle theme={theme} onToggle={onToggleTheme} floating/>
     <span className="brand-mark large" aria-hidden="true">W</span>
     <p className="eyebrow">MHB STAFF WORKSPACE</p>
     <h1>Curate Wesley’s trusted library.</h1>
@@ -313,9 +348,10 @@ function SignIn({ onSignIn, error }: { onSignIn: () => Promise<void>; error: str
   </section></main>;
 }
 
-function AccessDenied({ email, onActivate, onSignOut }: { email: string; onActivate: () => Promise<void>; onSignOut: () => Promise<void> }) {
+function AccessDenied({ email, onActivate, onSignOut, theme, onToggleTheme }: { email: string; onActivate: () => Promise<void>; onSignOut: () => Promise<void>; theme: Theme; onToggleTheme: () => void }) {
   const isInitialAdmin = email.toLowerCase() === "kakyireinc@gmail.com";
   return <main className="auth-page"><section className="auth-card">
+    <ThemeToggle theme={theme} onToggle={onToggleTheme} floating/>
     <p className="eyebrow">ACCESS RESTRICTED</p>
     <h1>This account is not a Wesley source administrator.</h1>
     <p>{email} is signed in, but does not have the required <code>wesley_admin</code> role.</p>
@@ -324,8 +360,9 @@ function AccessDenied({ email, onActivate, onSignOut }: { email: string; onActiv
   </section></main>;
 }
 
-function ConfigurationNotice({ detail }: { detail: string }) {
+function ConfigurationNotice({ detail, theme, onToggleTheme }: { detail: string; theme: Theme; onToggleTheme: () => void }) {
   return <main className="auth-page"><section className="auth-card">
+    <ThemeToggle theme={theme} onToggle={onToggleTheme} floating/>
     <p className="eyebrow">SETUP REQUIRED</p>
     <h1>Connect this dashboard to Firebase.</h1>
     <p>Copy <code>.env.example</code> to <code>.env.local</code>, add the Firebase web app configuration, then restart the development server.</p>
