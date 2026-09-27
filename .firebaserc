@@ -1,5 +1,21 @@
 {
   "projects": {
     "default": "mhb-staging"
+  },
+  "targets": {
+    "mhb-staging": {
+      "hosting": {
+        "staging": [
+          "mhb-admin-staging"
+        ]
+      }
+    },
+    "methodist-hymn-book": {
+      "hosting": {
+        "production": [
+          "admin-mhb"
+        ]
+      }
+    }
   }
 }
