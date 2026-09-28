@@ -1,4 +1,4 @@
-# Wesley Sources
+# MHB Dashboard
 
 Private MHB staff dashboard for adding reviewed Methodist sources to Wesley.
 

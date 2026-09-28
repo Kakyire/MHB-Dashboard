@@ -1,7 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { browserSessionPersistence, getAuth, GoogleAuthProvider, setPersistence } from "firebase/auth";
 import { getFunctions } from "firebase/functions";
-import { ReCaptchaEnterpriseProvider, initializeAppCheck } from "firebase/app-check";
+import { getToken, ReCaptchaEnterpriseProvider, initializeAppCheck } from "firebase/app-check";
 
 const requiredConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY ?? "",
@@ -25,14 +25,29 @@ export const firebaseConfigurationError = missingKeys.length > 0
 
 const app = initializeApp(requiredConfig);
 
-if (!firebaseConfigurationError) {
-  initializeAppCheck(app, {
+const appCheck = firebaseConfigurationError
+  ? null
+  : initializeAppCheck(app, {
     provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
     isTokenAutoRefreshEnabled: true,
   });
+
+/** Ensures an App Check token exists before calling a protected admin endpoint. */
+export async function requireAppCheckToken(): Promise<void> {
+  if (!appCheck) throw new Error("App Check is not configured for this dashboard.");
+  try {
+    await getToken(appCheck, false);
+  } catch {
+    throw new Error("App Check could not verify this dashboard. Register the production Web app with its reCAPTCHA Enterprise key in Firebase App Check, then refresh this page.");
+  }
 }
 
 export const auth = firebaseConfigurationError ? null : getAuth(app);
+/**
+ * Source-management sessions must not survive a browser restart. The UI adds
+ * a shorter inactivity timeout before this Firebase session can be reused.
+ */
+export const authReady = auth ? setPersistence(auth, browserSessionPersistence) : Promise.resolve();
 export const functions = firebaseConfigurationError ? null : getFunctions(app, "us-central1");
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: "select_account" });

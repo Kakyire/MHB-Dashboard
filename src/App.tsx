@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { auth, firebaseConfigurationError, functions, googleProvider } from "./firebase";
+import { auth, authReady, firebaseConfigurationError, functions, googleProvider, requireAppCheckToken } from "./firebase";
 import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type PublishedSource, type SourceDraft } from "./types";
 
 type Screen = "library" | "new" | "review";
@@ -33,6 +33,8 @@ type ImportedSource = {
   totalCharacters: number;
 };
 const SOURCE_INGESTION_TIMEOUT_MS = 9 * 60 * 1_000;
+const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
+const SESSION_ACTIVITY_EVENTS: Array<keyof WindowEventMap> = ["pointerdown", "keydown", "touchstart", "scroll"];
 
 type PublishedSourcesResponse = { sources: PublishedSource[] };
 
@@ -76,6 +78,7 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [activationPending, setActivationPending] = useState(false);
   const [source, setSource] = useState<SourceDraft>(initialSourceDraft);
   const [draftSnapshot, setDraftSnapshot] = useState<SourceDraft | null>(null);
   const [ingestedDraft, setIngestedDraft] = useState<IngestedDraft | null>(null);
@@ -105,12 +108,42 @@ export function App() {
       setAuthLoading(false);
       return undefined;
     }
-    return onAuthStateChanged(auth, async (nextUser) => {
-      setUser(nextUser);
-      setIsAdmin(Boolean(nextUser && (await nextUser.getIdTokenResult()).claims.wesley_admin === true));
+    const dashboardAuth = auth;
+    let unsubscribe: (() => void) | undefined;
+    void authReady.then(() => {
+      unsubscribe = onAuthStateChanged(dashboardAuth, async (nextUser) => {
+        setUser(nextUser);
+        setIsAdmin(Boolean(nextUser && (await nextUser.getIdTokenResult()).claims.wesley_admin === true));
+        setAuthLoading(false);
+      });
+    }).catch(() => {
+      setError("The secure dashboard session could not be initialized. Refresh and try again.");
       setAuthLoading(false);
     });
+    return () => unsubscribe?.();
   }, []);
+
+  useEffect(() => {
+    if (!user || !auth) return undefined;
+    const dashboardAuth = auth;
+
+    let timeoutId: number | undefined;
+    const expireSession = (): void => {
+      setError("Your session expired after 30 minutes of inactivity. Please sign in again.");
+      void signOut(dashboardAuth);
+    };
+    const resetSessionTimer = (): void => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(expireSession, SESSION_IDLE_TIMEOUT_MS);
+    };
+
+    SESSION_ACTIVITY_EVENTS.forEach((event) => window.addEventListener(event, resetSessionTimer, { passive: true }));
+    resetSessionTimer();
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      SESSION_ACTIVITY_EVENTS.forEach((event) => window.removeEventListener(event, resetSessionTimer));
+    };
+  }, [user]);
 
   const contentWordCount = useMemo(
     () => source.content.trim() ? source.content.trim().split(/\s+/).length : 0,
@@ -142,6 +175,7 @@ export function App() {
     if (!auth) return;
     setError(null);
     try {
+      await authReady;
       const credential = await signInWithPopup(auth, googleProvider);
       const token = await credential.user.getIdTokenResult(true);
       setIsAdmin(token.claims.wesley_admin === true);
@@ -153,7 +187,9 @@ export function App() {
   async function activateInitialAdmin(): Promise<void> {
     if (!auth || !functions) return;
     setError(null);
+    setActivationPending(true);
     try {
+      await requireAppCheckToken();
       const activate = httpsCallable<void, { activated: true }>(functions, "activateInitialWesleyAdmin");
       await activate();
       if (!auth.currentUser) throw new Error("No signed-in user was found.");
@@ -161,6 +197,8 @@ export function App() {
       setIsAdmin(token.claims.wesley_admin === true);
     } catch (activationError) {
       setError(readableError(activationError));
+    } finally {
+      setActivationPending(false);
     }
   }
 
@@ -271,16 +309,16 @@ export function App() {
   if (firebaseConfigurationError || !auth || !functions) {
     return <ConfigurationNotice detail={firebaseConfigurationError ?? "Firebase configuration is incomplete."} theme={theme} onToggleTheme={toggleTheme} />;
   }
-  if (authLoading) return <main className="loading-page">Opening Wesley Sources…</main>;
+  if (authLoading) return <main className="loading-page">Opening MHB Dashboard…</main>;
   if (!user) return <SignIn onSignIn={signIn} error={error} theme={theme} onToggleTheme={toggleTheme} />;
-  if (!isAdmin) return <AccessDenied email={user.email ?? "this account"} onActivate={activateInitialAdmin} onSignOut={signOutDashboard} theme={theme} onToggleTheme={toggleTheme} />;
+  if (!isAdmin) return <AccessDenied email={user.email ?? "this account"} error={error} activating={activationPending} onActivate={activateInitialAdmin} onSignOut={signOutDashboard} theme={theme} onToggleTheme={toggleTheme} />;
 
   return (
     <main className="app-shell">
       <header className="topbar">
-        <button className="brand" onClick={() => setScreen("library")} aria-label="Wesley Sources home">
+        <button className="brand" onClick={() => setScreen("library")} aria-label="MHB Dashboard home">
           <span className="brand-mark" aria-hidden="true">W</span>
-          <span><strong>Wesley Sources</strong><small>MHB staff workspace</small></span>
+          <span><strong>MHB Dashboard</strong><small>Wesley source workspace</small></span>
         </button>
         <div className="account">
           <ThemeToggle theme={theme} onToggle={toggleTheme}/>
@@ -343,19 +381,21 @@ function SignIn({ onSignIn, error, theme, onToggleTheme }: { onSignIn: () => Pro
     <p className="eyebrow">MHB STAFF WORKSPACE</p>
     <h1>Curate Wesley’s trusted library.</h1>
     <p>Draft and publish reviewed Methodist sources. Public MHB users cannot access this workspace.</p>
+    <p className="session-note">For security, staff sessions expire after 30 minutes of inactivity or when the browser closes.</p>
     {error && <p className="error-message" role="alert">{error}</p>}
     <button className="primary-button full" onClick={onSignIn}>Sign in with Google</button>
   </section></main>;
 }
 
-function AccessDenied({ email, onActivate, onSignOut, theme, onToggleTheme }: { email: string; onActivate: () => Promise<void>; onSignOut: () => Promise<void>; theme: Theme; onToggleTheme: () => void }) {
+function AccessDenied({ email, error, activating, onActivate, onSignOut, theme, onToggleTheme }: { email: string; error: string | null; activating: boolean; onActivate: () => Promise<void>; onSignOut: () => Promise<void>; theme: Theme; onToggleTheme: () => void }) {
   const isInitialAdmin = email.toLowerCase() === "kakyireinc@gmail.com";
   return <main className="auth-page"><section className="auth-card">
     <ThemeToggle theme={theme} onToggle={onToggleTheme} floating/>
     <p className="eyebrow">ACCESS RESTRICTED</p>
     <h1>This account is not a Wesley source administrator.</h1>
     <p>{email} is signed in, but does not have the required <code>wesley_admin</code> role.</p>
-    {isInitialAdmin && <button className="primary-button full" onClick={onActivate}>Activate administrator access</button>}
+    {error && <p className="error-message" role="alert">{error}</p>}
+    {isInitialAdmin && <button className="primary-button full" onClick={onActivate} disabled={activating}>{activating ? "Verifying App Check…" : "Activate administrator access"}</button>}
     <button className="secondary-button full" onClick={onSignOut}>Use another account</button>
   </section></main>;
 }
