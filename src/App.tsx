@@ -372,7 +372,7 @@ export function App() {
         </nav>
 
         <section className="content" aria-live="polite">
-          {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} stagingSources={stagingSources} stagingState={stagingLibraryState} showStagingImports={isProductionDashboard} importingSourceVersionId={promotingSourceVersionId} onImportStaging={importStagingSource} />}
+          {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} stagingSources={stagingSources} stagingState={stagingLibraryState} showStagingImports={isProductionDashboard} importingSourceVersionId={promotingSourceVersionId} onImportStaging={importStagingSource} error={error} />}
           {screen === "new" && (
             <SourceForm
               source={source}
@@ -447,7 +447,7 @@ function ConfigurationNotice({ detail, theme, onToggleTheme }: { detail: string;
   </section></main>;
 }
 
-function Library({ sources, state, onAdd, onRefresh, stagingSources, stagingState, showStagingImports, importingSourceVersionId, onImportStaging }: {
+function Library({ sources, state, onAdd, onRefresh, stagingSources, stagingState, showStagingImports, importingSourceVersionId, onImportStaging, error }: {
   sources: PublishedSource[];
   state: "loading" | "ready" | "error";
   onAdd: () => void;
@@ -457,6 +457,7 @@ function Library({ sources, state, onAdd, onRefresh, stagingSources, stagingStat
   showStagingImports: boolean;
   importingSourceVersionId: string | null;
   onImportStaging: (stagingSourceVersionId: string) => Promise<void>;
+  error: string | null;
 }) {
   const [query, setQuery] = useState("");
   const matchingSources = useMemo(() => {
@@ -481,16 +482,17 @@ function Library({ sources, state, onAdd, onRefresh, stagingSources, stagingStat
       <article><span className="status-dot review"/><strong>Review carefully</strong><p>Confirm authority, rights, extraction quality, and page references.</p></article>
       <article><span className="status-dot published"/><strong>Publish deliberately</strong><p>Only published versions can support a Wesley answer.</p></article>
     </div>
-    {showStagingImports && <StagingSourceImports sources={stagingSources} state={stagingState} importingSourceVersionId={importingSourceVersionId} onImport={onImportStaging}/>}
+    {showStagingImports && <StagingSourceImports sources={stagingSources} state={stagingState} importingSourceVersionId={importingSourceVersionId} onImport={onImportStaging} error={error}/>}
     <section className="callout"><h2>Start with primary sources.</h2><p>Use official Methodist Church Ghana publications, diocesan materials, approved constitutions, and licensed historical works. Do not add social posts, anonymous documents, or text without a valid right to use it.</p></section>
   </>;
 }
 
-function StagingSourceImports({ sources, state, importingSourceVersionId, onImport }: { sources: StagingSourcePromotion[]; state: "loading" | "ready" | "error"; importingSourceVersionId: string | null; onImport: (stagingSourceVersionId: string) => Promise<void> }) {
+function StagingSourceImports({ sources, state, importingSourceVersionId, onImport, error }: { sources: StagingSourcePromotion[]; state: "loading" | "ready" | "error"; importingSourceVersionId: string | null; onImport: (stagingSourceVersionId: string) => Promise<void>; error: string | null }) {
   return <section className="staging-imports" aria-labelledby="staging-sources-heading">
     <div><p className="eyebrow">STAGING PROMOTION</p><h2 id="staging-sources-heading">Import approved staging sources</h2><p>Bring reviewed staging versions into the empty production library. The original remains private, is copied into production storage, and a matching checksum is never imported twice.</p></div>
     {state === "loading" && <p className="library-message">Loading approved staging sources…</p>}
     {state === "error" && <p className="library-message">The staging catalogue is unavailable. Refresh this page and try again.</p>}
+    {error && <p className="error-message" role="alert">{error}</p>}
     {state === "ready" && sources.length === 0 && <p className="library-message">No approved staging sources are available to import.</p>}
     {state === "ready" && sources.length > 0 && <div className="staging-source-list">{sources.map((source) => <article className="staging-source" key={source.stagingSourceVersionId}>
       <div><h3>{source.title}</h3><p>{[source.publisher, source.versionLabel, source.jurisdiction].filter(Boolean).join(" · ")}</p></div>
