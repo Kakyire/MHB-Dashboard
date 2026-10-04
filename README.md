@@ -20,6 +20,9 @@ credential, service-role key, or Gemini credential.
    basis, then explicitly calls `publishWesleySourceVersion`.
 7. The Source library shows the approved sources already available to Wesley,
    so staff can check it before adding another item.
+8. On the production dashboard only, staff can import an approved staging
+   source version. The backend copies its private original and approved vectors
+   into production, and skips a version whose checksum is already present.
 
 The public MHB application cannot use any admin operation. Imports never
 publish automatically: a staff editor must review the extracted text and

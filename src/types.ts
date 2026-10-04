@@ -42,6 +42,12 @@ export interface PublishedSource {
   publishedAt?: string;
 }
 
+/** Approved staging metadata that the production dashboard can promote. */
+export interface StagingSourcePromotion extends PublishedSource {
+  stagingSourceVersionId: string;
+  alreadyImported: boolean;
+}
+
 export const initialSourceDraft: SourceDraft = {
   title: "",
   publisher: "",

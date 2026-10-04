@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { auth, authReady, firebaseConfigurationError, functions, googleProvider, requireAppCheckToken } from "./firebase";
-import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type PublishedSource, type SourceDraft } from "./types";
+import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type PublishedSource, type SourceDraft, type StagingSourcePromotion } from "./types";
 
 type Screen = "library" | "new" | "review";
 type RequestState = "idle" | "importing" | "creating" | "publishing" | "published";
@@ -37,6 +37,7 @@ const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1_000;
 const SESSION_ACTIVITY_EVENTS: Array<keyof WindowEventMap> = ["pointerdown", "keydown", "touchstart", "scroll"];
 
 type PublishedSourcesResponse = { sources: PublishedSource[] };
+type StagingSourcePromotionsResponse = { sources: StagingSourcePromotion[] };
 
 const authorityLabels: Record<number, string> = {
   5: "5 — Official MCG primary publication",
@@ -86,6 +87,9 @@ export function App() {
   const [requestState, setRequestState] = useState<RequestState>("idle");
   const [publishedSources, setPublishedSources] = useState<PublishedSource[]>([]);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "error">("loading");
+  const [stagingSources, setStagingSources] = useState<StagingSourcePromotion[]>([]);
+  const [stagingLibraryState, setStagingLibraryState] = useState<"loading" | "ready" | "error">("loading");
+  const [promotingSourceVersionId, setPromotingSourceVersionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<Theme>(initialTheme);
 
@@ -163,13 +167,29 @@ export function App() {
     }
   }, []);
 
+  const isProductionDashboard = import.meta.env.VITE_FIREBASE_PROJECT_ID === "methodist-hymn-book";
+  const loadStagingSources = useCallback(async (): Promise<void> => {
+    if (!functions || !isProductionDashboard) return;
+    setStagingLibraryState("loading");
+    try {
+      const list = httpsCallable<void, StagingSourcePromotionsResponse>(functions, "listStagingWesleySourcePromotions");
+      const { data } = await list();
+      setStagingSources(data.sources);
+      setStagingLibraryState("ready");
+    } catch {
+      setStagingLibraryState("error");
+    }
+  }, [isProductionDashboard]);
+
   useEffect(() => {
     if (!isAdmin) {
       setPublishedSources([]);
+      setStagingSources([]);
       return;
     }
     void loadPublishedSources();
-  }, [isAdmin, loadPublishedSources]);
+    void loadStagingSources();
+  }, [isAdmin, loadPublishedSources, loadStagingSources]);
 
   async function signIn(): Promise<void> {
     if (!auth) return;
@@ -296,6 +316,23 @@ export function App() {
     }
   }
 
+  async function importStagingSource(stagingSourceVersionId: string): Promise<void> {
+    if (!functions) return;
+    setPromotingSourceVersionId(stagingSourceVersionId);
+    setError(null);
+    try {
+      const promote = httpsCallable<{ stagingSourceVersionId: string }, { sourceId: string; sourceVersionId: string; imported: boolean }>(functions, "importStagingWesleySource", { timeout: 120_000 });
+      await promote({ stagingSourceVersionId });
+      setStagingSources((current) => current.map((source) => source.stagingSourceVersionId === stagingSourceVersionId ? { ...source, alreadyImported: true } : source));
+      void loadPublishedSources();
+      void loadStagingSources();
+    } catch (promotionError) {
+      setError(readableError(promotionError));
+    } finally {
+      setPromotingSourceVersionId(null);
+    }
+  }
+
   function startAnotherSource(): void {
     setSource(initialSourceDraft);
     setDraftSnapshot(null);
@@ -335,7 +372,7 @@ export function App() {
         </nav>
 
         <section className="content" aria-live="polite">
-          {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} />}
+          {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} stagingSources={stagingSources} stagingState={stagingLibraryState} showStagingImports={isProductionDashboard} importingSourceVersionId={promotingSourceVersionId} onImportStaging={importStagingSource} />}
           {screen === "new" && (
             <SourceForm
               source={source}
@@ -410,7 +447,17 @@ function ConfigurationNotice({ detail, theme, onToggleTheme }: { detail: string;
   </section></main>;
 }
 
-function Library({ sources, state, onAdd, onRefresh }: { sources: PublishedSource[]; state: "loading" | "ready" | "error"; onAdd: () => void; onRefresh: () => Promise<void> }) {
+function Library({ sources, state, onAdd, onRefresh, stagingSources, stagingState, showStagingImports, importingSourceVersionId, onImportStaging }: {
+  sources: PublishedSource[];
+  state: "loading" | "ready" | "error";
+  onAdd: () => void;
+  onRefresh: () => Promise<void>;
+  stagingSources: StagingSourcePromotion[];
+  stagingState: "loading" | "ready" | "error";
+  showStagingImports: boolean;
+  importingSourceVersionId: string | null;
+  onImportStaging: (stagingSourceVersionId: string) => Promise<void>;
+}) {
   const [query, setQuery] = useState("");
   const matchingSources = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -434,8 +481,22 @@ function Library({ sources, state, onAdd, onRefresh }: { sources: PublishedSourc
       <article><span className="status-dot review"/><strong>Review carefully</strong><p>Confirm authority, rights, extraction quality, and page references.</p></article>
       <article><span className="status-dot published"/><strong>Publish deliberately</strong><p>Only published versions can support a Wesley answer.</p></article>
     </div>
+    {showStagingImports && <StagingSourceImports sources={stagingSources} state={stagingState} importingSourceVersionId={importingSourceVersionId} onImport={onImportStaging}/>}
     <section className="callout"><h2>Start with primary sources.</h2><p>Use official Methodist Church Ghana publications, diocesan materials, approved constitutions, and licensed historical works. Do not add social posts, anonymous documents, or text without a valid right to use it.</p></section>
   </>;
+}
+
+function StagingSourceImports({ sources, state, importingSourceVersionId, onImport }: { sources: StagingSourcePromotion[]; state: "loading" | "ready" | "error"; importingSourceVersionId: string | null; onImport: (stagingSourceVersionId: string) => Promise<void> }) {
+  return <section className="staging-imports" aria-labelledby="staging-sources-heading">
+    <div><p className="eyebrow">STAGING PROMOTION</p><h2 id="staging-sources-heading">Import approved staging sources</h2><p>Bring reviewed staging versions into the empty production library. The original remains private, is copied into production storage, and a matching checksum is never imported twice.</p></div>
+    {state === "loading" && <p className="library-message">Loading approved staging sources…</p>}
+    {state === "error" && <p className="library-message">The staging catalogue is unavailable. Refresh this page and try again.</p>}
+    {state === "ready" && sources.length === 0 && <p className="library-message">No approved staging sources are available to import.</p>}
+    {state === "ready" && sources.length > 0 && <div className="staging-source-list">{sources.map((source) => <article className="staging-source" key={source.stagingSourceVersionId}>
+      <div><h3>{source.title}</h3><p>{[source.publisher, source.versionLabel, source.jurisdiction].filter(Boolean).join(" · ")}</p></div>
+      <div className="staging-source-action">{source.alreadyImported ? <span className="imported-label">Already in production</span> : <button className="secondary-button" onClick={() => void onImport(source.stagingSourceVersionId)} disabled={importingSourceVersionId !== null}>{importingSourceVersionId === source.stagingSourceVersionId ? "Importing…" : "Import to production"}</button>}</div>
+    </article>)}</div>}
+  </section>;
 }
 
 function PublishedSourceRow({ source }: { source: PublishedSource }) {
