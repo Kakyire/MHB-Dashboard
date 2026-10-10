@@ -232,3 +232,9 @@ html[data-theme="dark"] .session-note { color: #d2b6a3 !important; }
   .staging-source { align-items: stretch; flex-direction: column; }
   .staging-source-action { align-self: flex-start; }
 }
+
+.release-request { padding: 24px; margin: 18px 0 30px; overflow-wrap: anywhere; }
+.release-request label { display: block; margin: 18px 0 10px; font-weight: 600; }
+.release-request textarea { min-height: 120px; margin-top: 8px; font-weight: 400; }
+.release-request blockquote { margin: 18px 0; padding: 16px; border-left: 3px solid #a65578; background: #f7f0f3; }
+html[data-theme="dark"] .release-request blockquote { background: #33262d; }

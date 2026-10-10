@@ -1,10 +1,11 @@
+import { ReleaseQueue } from "./ReleaseQueue";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { auth, authReady, firebaseConfigurationError, functions, googleProvider, requireAppCheckToken } from "./firebase";
 import { initialSourceDraft, type CopyrightStatus, type IngestedDraft, type PublishedSource, type SourceDraft, type StagingSourcePromotion } from "./types";
 
-type Screen = "library" | "new" | "review";
+type Screen = "requests" | "library" | "new" | "review";
 type RequestState = "idle" | "importing" | "creating" | "publishing" | "published";
 type Theme = "light" | "dark";
 type IngestSourceDraft = Pick<SourceDraft, "title" | "authorityLevel" | "content"> & {
@@ -368,10 +369,12 @@ export function App() {
         <nav className="side-nav" aria-label="Primary navigation">
           <button className={screen === "library" ? "active" : ""} onClick={() => setScreen("library")}>Source library</button>
           <button className={screen === "new" || screen === "review" ? "active" : ""} onClick={startAnotherSource}>Add a source</button>
+          <button className={screen === "requests" ? "active" : ""} onClick={() => setScreen("requests")}>Reports and deletions</button>
           <p className="nav-note">Only approved source versions can answer Wesley questions.</p>
         </nav>
 
         <section className="content" aria-live="polite">
+          {screen === "requests" && <ReleaseQueue />}
           {screen === "library" && <Library sources={publishedSources} state={libraryState} onAdd={startAnotherSource} onRefresh={loadPublishedSources} stagingSources={stagingSources} stagingState={stagingLibraryState} showStagingImports={isProductionDashboard} importingSourceVersionId={promotingSourceVersionId} onImportStaging={importStagingSource} error={error} />}
           {screen === "new" && (
             <SourceForm
